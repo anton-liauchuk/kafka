@@ -130,6 +130,11 @@ class WorkerSourceTask extends AbstractWorkerSourceTask {
     }
 
     @Override
+    protected void ackFailedRecord(SourceRecord sourceRecord) {
+        submittedRecords.submit(sourceRecord).ack();
+    }
+
+    @Override
     protected Optional<SubmittedRecords.SubmittedRecord> prepareToSendRecord(
             SourceRecord sourceRecord,
             ProducerRecord<byte[], byte[]> producerRecord

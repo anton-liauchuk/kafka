@@ -29,6 +29,7 @@ public class ProcessingContext<T> {
     private Class<?> klass;
     private int attempt;
     private Throwable error;
+    private boolean ackFailedRecord;
 
     /**
      * Construct a context associated with the processing of a particular record
@@ -121,5 +122,13 @@ public class ProcessingContext<T> {
      */
     public boolean failed() {
         return error() != null;
+    }
+
+    public void ackFailedRecord(boolean ackFailedRecord) {
+        this.ackFailedRecord = ackFailedRecord;
+    }
+
+    public boolean ackFailedRecord() {
+        return ackFailedRecord;
     }
 }

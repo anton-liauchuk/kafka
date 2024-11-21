@@ -111,6 +111,8 @@ public abstract class AbstractWorkerSourceTask extends WorkerTask<SourceRecord, 
      */
     protected abstract void recordDropped(SourceRecord record);
 
+    protected abstract void ackFailedRecord(SourceRecord record);
+
     /**
      * Invoked when a record is about to be dispatched to the producer. May be invoked multiple times for the same
      * record if retriable errors are encountered.
@@ -400,6 +402,10 @@ public abstract class AbstractWorkerSourceTask extends WorkerTask<SourceRecord, 
             final SourceRecord record = transformationChain.apply(context, preTransformRecord);
             final ProducerRecord<byte[], byte[]> producerRecord = convertTransformedRecord(context, record);
             if (producerRecord == null || context.failed()) {
+                if (context.ackFailedRecord()) {
+                    ackFailedRecord(preTransformRecord);
+                    continue;
+                }
                 counter.skipRecord();
                 recordDropped(preTransformRecord);
                 processed++;

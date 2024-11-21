@@ -31,7 +31,8 @@ public enum ToleranceType {
     /**
      * Tolerate all errors.
      */
-    ALL;
+    ALL,
+    CUSTOM;
 
     public String value() {
         return name().toLowerCase(Locale.ROOT);

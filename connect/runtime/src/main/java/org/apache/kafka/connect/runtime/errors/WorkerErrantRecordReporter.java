@@ -22,6 +22,8 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.header.Header;
+import org.apache.kafka.connect.reporter.ErrorContext;
+import org.apache.kafka.connect.reporter.ErrorHandler.ErrorHandlerResponse;
 import org.apache.kafka.connect.runtime.InternalSinkRecord;
 import org.apache.kafka.connect.sink.ErrantRecordReporter;
 import org.apache.kafka.connect.sink.SinkRecord;
@@ -58,6 +60,7 @@ public class WorkerErrantRecordReporter implements ErrantRecordReporter {
     // Visible for testing
     protected final ConcurrentMap<TopicPartition, List<Future<Void>>> futures;
     private final AtomicReference<Throwable> taskPutException;
+    private final AtomicReference<ProcessingContext<ConsumerRecord<byte[], byte[]>>> processingContext;
 
     public WorkerErrantRecordReporter(
         RetryWithToleranceOperator<ConsumerRecord<byte[], byte[]>> retryWithToleranceOperator,
@@ -71,6 +74,7 @@ public class WorkerErrantRecordReporter implements ErrantRecordReporter {
         this.headerConverter = headerConverter;
         this.futures = new ConcurrentHashMap<>();
         this.taskPutException = new AtomicReference<>();
+        this.processingContext = new AtomicReference<>();
     }
 
     @Override
@@ -112,6 +116,7 @@ public class WorkerErrantRecordReporter implements ErrantRecordReporter {
 
         Future<Void> future = retryWithToleranceOperator.executeFailed(context, Stage.TASK_PUT, SinkTask.class, error);
         taskPutException.compareAndSet(null, error);
+        processingContext.compareAndSet(null, context);
 
         if (!future.isDone()) {
             TopicPartition partition = new TopicPartition(context.original().topic(), context.original().partition());
@@ -160,7 +165,14 @@ public class WorkerErrantRecordReporter implements ErrantRecordReporter {
     }
 
     public synchronized void maybeThrowAsyncError() {
-        if (taskPutException.get() != null && !retryWithToleranceOperator.withinToleranceLimits()) {
+        ErrorHandlerResponse errorHandlerResponse = retryWithToleranceOperator.handleError(new ErrorContext<>(
+                processingContext.get().stage().name(),
+                processingContext.get().executingClass().getName(),
+                processingContext.get().original(),
+                processingContext.get().error()
+        ));
+        processingContext.get().ackFailedRecord(ErrorHandlerResponse.ACK.equals(errorHandlerResponse));
+        if (taskPutException.get() != null && ErrorHandlerResponse.FAIL.equals(errorHandlerResponse)) {
             throw new ConnectException("Tolerance exceeded in error handler", taskPutException.get());
         }
     }

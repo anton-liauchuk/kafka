@@ -161,6 +161,14 @@ class ExactlyOnceWorkerSourceTask extends AbstractWorkerSourceTask {
     }
 
     @Override
+    protected void ackFailedRecord(SourceRecord record) {
+        synchronized (committableRecords) {
+            committableRecords.put(record, null);
+        }
+        offsetWriter.offset(record.sourcePartition(), record.sourceOffset());
+    }
+
+    @Override
     protected Optional<SubmittedRecords.SubmittedRecord> prepareToSendRecord(
             SourceRecord sourceRecord,
             ProducerRecord<byte[], byte[]> producerRecord

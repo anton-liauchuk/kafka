@@ -21,6 +21,8 @@ import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.errors.RetriableException;
+import org.apache.kafka.connect.reporter.ErrorHandler;
+import org.apache.kafka.connect.reporter.ErrorHandler.ErrorHandlerResponse;
 import org.apache.kafka.connect.runtime.ConnectorConfig;
 
 import org.apache.kafka.connect.reporter.ErrorContext;
@@ -88,6 +90,7 @@ public class RetryWithToleranceOperator<T> implements AutoCloseable {
     private volatile boolean stopping;   // indicates whether the operator has been asked to stop retrying
     private List<ErrorReporter<T>> reporters;
     private List<ErrorRecordReporter<T>> errorRecordReporters;
+    private ErrorHandler<T> errorHandler;
 
     public RetryWithToleranceOperator(long errorRetryTimeout, long errorMaxDelayInMillis,
                                       ToleranceType toleranceType, Time time, ErrorHandlingMetrics errorHandlingMetrics) {
@@ -125,7 +128,14 @@ public class RetryWithToleranceOperator<T> implements AutoCloseable {
         context.error(error);
         errorHandlingMetrics.recordFailure();
         Future<Void> errantRecordFuture = report(context);
-        if (!withinToleranceLimits()) {
+
+        ErrorHandlerResponse errorHandlerResponse = handleError(new ErrorContext<>(context.stage().name(),
+                context.executingClass().getName(),
+                context.original(),
+                context.error()
+        ));
+        context.ackFailedRecord(ErrorHandlerResponse.ACK.equals(errorHandlerResponse));
+        if (ErrorHandlerResponse.FAIL.equals(errorHandlerResponse)) {
             errorHandlingMetrics.recordError();
             throw new ConnectException("Tolerance exceeded in error handler", error);
         }
@@ -262,7 +272,13 @@ public class RetryWithToleranceOperator<T> implements AutoCloseable {
                 throw new ConnectException("Unhandled exception in error handler", e);
             }
 
-            if (!withinToleranceLimits()) {
+            ErrorHandlerResponse errorHandlerResponse = handleError(new ErrorContext<>(context.stage().name(),
+                    context.executingClass().getName(),
+                    context.original(),
+                    context.error()
+            ));
+            context.ackFailedRecord(ErrorHandlerResponse.ACK.equals(errorHandlerResponse));
+            if (ErrorHandlerResponse.FAIL.equals(errorHandlerResponse)) {
                 throw new ConnectException("Tolerance exceeded in error handler", e);
             }
 
@@ -278,12 +294,14 @@ public class RetryWithToleranceOperator<T> implements AutoCloseable {
     }
 
     @SuppressWarnings("fallthrough")
-    public synchronized boolean withinToleranceLimits() {
+    public synchronized ErrorHandlerResponse handleError(ErrorContext<T> errorContext) {
         switch (errorToleranceType) {
             case NONE:
-                if (totalFailures > 0) return false;
+                if (totalFailures > 0) return ErrorHandlerResponse.FAIL;
             case ALL:
-                return true;
+                return ErrorHandlerResponse.DROP;
+            case CUSTOM:
+                return errorHandler.handleError(errorContext);
             default:
                 throw new ConfigException("Unknown tolerance type: {}", errorToleranceType);
         }
